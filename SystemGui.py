@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox
 import threading
 import cv2
+
 def show_registration_page():
     hide_all_frames()
     registration_frame.pack(fill="both", expand=True)
@@ -46,7 +47,25 @@ def start_video():
             break
     video.release()
     cv2.destroyAllWindows()
+    load_videos()
 
+def load_videos():
+    surveillance_frame.columnconfigure((0),weight=1)
+    surveillance_frame.rowconfigure((0,1,2,3),weight=1)
+    print("reloaded!!")
+
+    for i in range(4):
+        video=tk.Frame(surveillance_frame,highlightbackground='black',highlightthickness=2)
+        video.grid(row=i,column=0,sticky='nsew',padx=5,pady=5)
+        video.columnconfigure((0,1,2,3),weight=1)
+        video.rowconfigure(0,weight=1)
+        video_label=tk.Label(video,text="Video1",bg='white',padx=5,pady=5)
+        video_btn=tk.Button(video,text="Play",command=lambda:threading.Thread(target=start_video).start())
+        video_analytics=tk.Button(video,text="Analytics",command=show_analytics_page)
+        video_label.grid(row=0,column=0,sticky='ew')
+        video_btn.grid(row=0,column=2,sticky='ew')
+        video_analytics.grid(row=0,column=3,sticky='ew')
+    home_state=0
 
 
 # Main application window
@@ -106,26 +125,7 @@ surveillance_frame=tk.Frame(home_frame,bg='purple')
 
 profile_frame.grid(row=0,column=0,sticky='nsew')
 surveillance_frame.grid(row=1,column=0,sticky='nsew')
-
-surveillance_frame.columnconfigure((0),weight=1)
-surveillance_frame.rowconfigure((0,1,2,3),weight=1)
-
-for i in range(4):
-    video=tk.Frame(surveillance_frame,borderwidth=2)
-    video.grid(row=i,column=0,sticky='nsew')
-    video.columnconfigure((0,1,2,3),weight=1)
-    video.rowconfigure(0,weight=1)
-    video_label=tk.Label(video,text="Video1",bg='white',padx=5,pady=5)
-    video_btn=tk.Button(video,text="Play")
-    video_analytics=tk.Button(video,text="Analytics")
-    video_label.grid(row=0,column=0,sticky='ew')
-    video_btn.grid(row=0,column=2,sticky='ew')
-    video_analytics.grid(row=0,column=3,sticky='ew')
-
-
-
-
-
+load_videos()
 
 
 
