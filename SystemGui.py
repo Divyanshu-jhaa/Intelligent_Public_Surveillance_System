@@ -1,7 +1,28 @@
 import tkinter as tk
 from tkinter import messagebox
 import threading
+import numpy as np
+import json
 import cv2
+import requests
+import base64
+import datetime
+from bson.objectid import ObjectId
+import time
+import gridfs
+from pymongo import MongoClient
+#globals 
+
+video_data=[]
+anomaly_data=[]
+user_data={}
+#db connection
+client=MongoClient("mongodb://localhost:27017")
+db=client.SurveillanceDB
+user_records=db.user_records
+video_records=db.video_records
+anomaly_records=db.anomaly_records
+
 
 def show_registration_page():
     hide_all_frames()
@@ -37,41 +58,89 @@ def login_user():
     # Here you would add code to verify the user info (e.g., check against a database or file)
     messagebox.showinfo("Login", "Login successful!")
     show_home_page()
-def start_video():
-    # print("clicked")
-    video=cv2.VideoCapture(0)
+def play_video(video):
+    fs = gridfs.GridFS(db)
+    # print(video)
+    counter=0
     while True:
-        ok,frame=video.read()
-        cv2.imshow('video',frame)
-        if cv2.waitKey(1) & 0xFF==ord('q'):
+        frame_data = fs.get( ObjectId(video['frame_ids'][counter])).read()
+        frame = np.frombuffer(frame_data, dtype=np.uint8)
+        frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+        cv2.imshow('video', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-    video.release()
+        counter+=1
+        if(counter==len(video['frame_ids'])):
+            counter=0
     cv2.destroyAllWindows()
-    load_videos()
+
+
+ 
+  
 
 def load_videos():
+    response=requests.post("http://127.0.0.1:5000/api/getVideos")
+    data=response.json()['res']
+    numVideos=len(data)
     surveillance_frame.columnconfigure((0),weight=1)
-    surveillance_frame.rowconfigure((0,1,2,3),weight=1)
+    temp=(0,1)
+    if(numVideos):
+        temp=tuple([x for x in range(numVideos)])
+    surveillance_frame.rowconfigure(temp,weight=1)
     print("reloaded!!")
-
-    for i in range(4):
+    
+    for i in range(numVideos):
         video=tk.Frame(surveillance_frame,highlightbackground='black',highlightthickness=2)
         video.grid(row=i,column=0,sticky='nsew',padx=5,pady=5)
         video.columnconfigure((0,1,2,3),weight=1)
         video.rowconfigure(0,weight=1)
-        video_label=tk.Label(video,text="Video1",bg='white',padx=5,pady=5)
-        video_btn=tk.Button(video,text="Play",command=lambda:threading.Thread(target=start_video).start())
-        video_analytics=tk.Button(video,text="Analytics",command=show_analytics_page)
+        video_label=tk.Label(video,text=data[i]['name'],bg='white',padx=5,pady=5)
+        video_btn=tk.Button(video,text="Play",command=lambda vid=data[i]:threading.Thread(target=play_video(vid)).start())
+        video_analytics=tk.Button(video,text="Analytics")
         video_label.grid(row=0,column=0,sticky='ew')
         video_btn.grid(row=0,column=2,sticky='ew')
         video_analytics.grid(row=0,column=3,sticky='ew')
-    home_state=0
+
+def start_video():
+    video=cv2.VideoCapture(0)
+    frames=[]
+    video_data={"date":"","name":"","frame_ids":[]}
+    fs = gridfs.GridFS(db)
+
+    while True:
+        ok,frame=video.read()
+        cv2.imshow('video',frame)
+        _,buffer=cv2.imencode('.jpg', frame)
+        # Store frame in GridFS
+        frame_id = fs.put(buffer.tobytes())
+        frames.append(frame_id)
+        # time.sleep(1)
+      
+        if cv2.waitKey(1) & 0xFF==ord('q'):
+            break
+    video.release()
+    cv2.destroyAllWindows()
+  
+
+    video_data["date"]="19.05.24"
+    video_data["name"]="surveillance_"+str(datetime.datetime.now())
+    video_data["frame_ids"]=frames
+
+    response=requests.post("http://127.0.0.1:5000/api/addVideo",data=json.dumps(video_data,default=str))
+    load_videos()
+
+
+def load_profile():
+    profile_frame.columnconfigure((0,1,2,3),weight=1)
+    profile_frame.rowconfigure((0),weight=1)
+    start_surveillance=tk.Button(profile_frame,text="start",command=lambda: threading.Thread(target=start_video).start())
+    start_surveillance.grid(row=0,column=3,sticky='ew',padx=5,pady=5)
 
 
 # Main application window
 app = tk.Tk()
 app.title("Multi-Page GUI")
-app.geometry("300x200")
+app.geometry("800x500")
 
 # Registration page
 registration_frame = tk.Frame(app)
@@ -125,7 +194,9 @@ surveillance_frame=tk.Frame(home_frame,bg='purple')
 
 profile_frame.grid(row=0,column=0,sticky='nsew')
 surveillance_frame.grid(row=1,column=0,sticky='nsew')
+load_profile()
 load_videos()
+
 
 
 
