@@ -1,20 +1,53 @@
 import tkinter as tk
 from tkinter import messagebox
 import threading
+import tensorflow as tf
 import numpy as np
 import json
 import cv2
+from datetime import datetime
 import requests
 import base64
-import datetime
 from bson.objectid import ObjectId
 import time
 import gridfs
 from pymongo import MongoClient
-#globals 
+#LRCN model Variables
+IMAGE_HEIGHT , IMAGE_WIDTH = 200, 100
+SEQUENCE_LENGTH = 20
+CLASSES_LIST = ["Explosion", "Fighting", "Robbery","RoadAccidents"]
+# LRCN model
+LRCN_model=tf.keras.models.load_model("D:/EDI_SEM6/Intelligent_Public_surveillance_System/Model_v2_f4_A55.h5") 
+#Prediction function
+def predict_single_action(raw_frames, SEQUENCE_LENGTH):
+    '''
+    This function will perform single action recognition prediction on real time video
+    Args:
+    Raw_frames:  List of frames of the real time video.
+    SEQUENCE_LENGTH:  The fixed number of frames of a video that can be passed to the model as one sequence.
+    '''
 
-video_data=[]
-anomaly_data=[]
+    frames_list = []
+    predicted_class_name = ''
+    for frame_counter in range(SEQUENCE_LENGTH):
+        frame=raw_frames[frame_counter]
+        resized_frame = cv2.resize(frame, (IMAGE_HEIGHT, IMAGE_WIDTH))
+        normalized_frame = resized_frame / 255
+        frames_list.append(normalized_frame)
+    predicted_labels_probabilities = LRCN_model.predict(np.expand_dims(frames_list, axis = 0))[0]
+    print(predicted_labels_probabilities)
+    predicted_label = np.argmax(predicted_labels_probabilities)
+    predicted_class_name = CLASSES_LIST[predicted_label]
+    print(f'Action Predicted: {predicted_class_name}\nConfidence: {predicted_labels_probabilities[predicted_label]}')
+    return predicted_label,predicted_labels_probabilities[predicted_label]
+
+
+#YOLO
+yolo=cv2.dnn.readNet("./yolov3.weights","./yolov3.cfg")
+classes=[]
+with open("./coco.names",'r') as f:
+    classes=f.read().splitlines()
+#globals 
 user_data={}
 #db connection
 client=MongoClient("mongodb://localhost:27017")
@@ -96,7 +129,7 @@ def load_videos():
         video.rowconfigure(0,weight=1)
         video_label=tk.Label(video,text=data[i]['name'],bg='white',padx=5,pady=5)
         video_btn=tk.Button(video,text="Play",command=lambda vid=data[i]:threading.Thread(target=play_video(vid)).start())
-        video_analytics=tk.Button(video,text="Analytics")
+        video_analytics=tk.Button(video,text="Analytics",command=show_analytics_page)
         video_label.grid(row=0,column=0,sticky='ew')
         video_btn.grid(row=0,column=2,sticky='ew')
         video_analytics.grid(row=0,column=3,sticky='ew')
@@ -104,26 +137,93 @@ def load_videos():
 def start_video():
     video=cv2.VideoCapture(0)
     frames=[]
-    video_data={"date":"","name":"","frame_ids":[]}
+    video_data={"date":"","name":"","frame_ids":[],"density":[]}
+    anomaly_data={"date":"","time":"","frame_ids":[] }
     fs = gridfs.GridFS(db)
-
-    while True:
+    raw_frames=[]
+    cnt=0
+    while True:  
         ok,frame=video.read()
+
+        if not ok:
+            break
+        # raw_frames.append(frame)
+        # # Anomaly Detection
+        # if len(raw_frames)==20:
+        #     predicted_label,probability=predict_single_action(raw_frames,SEQUENCE_LENGTH)
+        #     if(probability>=0.3):
+        #         anomaly_data
+
+
+
+        #Person Density Calculation
+
+        # frame = cv2.resize(frame, (frame_width, frame_height))
+        height, width, _ = frame.shape
+        if(cnt%100==0):
+            now = datetime.now()
+            current_time = now.strftime("%H%M")
+            num_person=0
+            blob = cv2.dnn.blobFromImage(frame, 1/255, (320, 320), (0, 0, 0), swapRB=True, crop=False)
+            yolo.setInput(blob)
+            output_layer_name = yolo.getUnconnectedOutLayersNames()
+            layeroutput = yolo.forward(output_layer_name)
+            boxes = []
+            confidences = []
+            class_ids = []
+
+            for output in layeroutput:
+                for detection in output:
+                    scores = detection[5:]
+                    class_id = np.argmax(scores)
+                    confidence = scores[class_id]
+                    if confidence > 0.7:
+                        center_x = int(detection[0] * width)
+                        center_y = int(detection[1] * height)
+                        w = int(detection[2] * width)
+                        h = int(detection[3] * height)
+                        x = int(center_x - w / 2)
+                        y = int(center_y - h / 2)
+                        boxes.append([x, y, w, h])
+                        confidences.append(float(confidence))
+                        class_ids.append(class_id)
+
+            indexes = cv2.dnn.NMSBoxes(boxes, confidences, 0.5, 0.4)
+            font = cv2.FONT_HERSHEY_PLAIN
+            colors = np.random.uniform(0, 255, size=(len(boxes), 3))
+            
+            if(len(indexes)>0):
+                for i in indexes.flatten():
+                    x, y, w, h = boxes[i]
+                    label = str(classes[class_ids[i]])
+                    if(class_ids[i]==0):
+                        num_person+=1
+                    confi = str(round(confidences[i], 2))
+                    color = colors[i]
+                    # cv2.rectangle(frame, (x, y), (x+w, y+h), color, 1)
+                    # cv2.putText(frame, label + " " + confi, (x, y+20), font, 2, (0, 0, 255), 1)
+            video_data['density'].append([current_time,num_person])
+        cv2.putText(frame, "Persons:" + " " + str(num_person), (40, 20), font, 2, (0, 0, 255), 2)
         cv2.imshow('video',frame)
-        _,buffer=cv2.imencode('.jpg', frame)
+        cnt+=1
         # Store frame in GridFS
+        _,buffer=cv2.imencode('.jpg', frame)
         frame_id = fs.put(buffer.tobytes())
         frames.append(frame_id)
-        # time.sleep(1)
-      
+
+
         if cv2.waitKey(1) & 0xFF==ord('q'):
             break
+
+
+
+
     video.release()
     cv2.destroyAllWindows()
   
 
-    video_data["date"]="19.05.24"
-    video_data["name"]="surveillance_"+str(datetime.datetime.now())
+    video_data["date"]=str(datetime.now()).split()[0]
+    video_data["name"]="surveillance_"+str(datetime.now())
     video_data["frame_ids"]=frames
 
     response=requests.post("http://127.0.0.1:5000/api/addVideo",data=json.dumps(video_data,default=str))
@@ -218,6 +318,6 @@ tk.Label(analytics_frame, text="Analytics Page").pack(pady=10)
 tk.Button(analytics_frame, text="Back", command=show_home_page).pack()
 
 # Start with the registration page
-# show_registration_page()
-show_home_page()
+show_registration_page()
+# show_home_page()
 app.mainloop()
