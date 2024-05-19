@@ -8,6 +8,8 @@ import cv2
 from datetime import datetime
 import requests
 import base64
+from server import db
+from server import client
 from bson.objectid import ObjectId
 import time
 import gridfs
@@ -49,12 +51,7 @@ with open("./coco.names",'r') as f:
     classes=f.read().splitlines()
 #globals 
 user_data={}
-#db connection
-client=MongoClient("mongodb://localhost:27017")
-db=client.SurveillanceDB
-user_records=db.user_records
-video_records=db.video_records
-anomaly_records=db.anomaly_records
+
 
 
 def show_registration_page():
@@ -138,24 +135,24 @@ def start_video():
     video=cv2.VideoCapture(0)
     frames=[]
     video_data={"date":"","name":"","frame_ids":[],"density":[]}
-    anomaly_data={"date":"","time":"","frame_ids":[] }
+    # anomaly_data={"date":"","time":"","frame_ids":[] }
+    anomaly_videos=[]
     fs = gridfs.GridFS(db)
     raw_frames=[]
     cnt=0
+    num_person=0
     while True:  
         ok,frame=video.read()
 
         if not ok:
             break
-        # raw_frames.append(frame)
-        # # Anomaly Detection
-        # if len(raw_frames)==20:
-        #     predicted_label,probability=predict_single_action(raw_frames,SEQUENCE_LENGTH)
-        #     if(probability>=0.3):
-        #         anomaly_data
-
-
-
+        raw_frames.append(frame)
+        # Anomaly Detection
+        if len(raw_frames)==20:
+            predicted_label,probability=predict_single_action(raw_frames,SEQUENCE_LENGTH)
+            if(probability>=0.5):
+                anomaly_videos.append({"raw_frames":raw_frames,"predicted_label":int(predicted_label),"confidence":probability})
+            raw_frames.clear()
         #Person Density Calculation
 
         # frame = cv2.resize(frame, (frame_width, frame_height))
@@ -206,6 +203,7 @@ def start_video():
         cv2.putText(frame, "Persons:" + " " + str(num_person), (40, 20), font, 2, (0, 0, 255), 2)
         cv2.imshow('video',frame)
         cnt+=1
+        # print(cnt)
         # Store frame in GridFS
         _,buffer=cv2.imencode('.jpg', frame)
         frame_id = fs.put(buffer.tobytes())
@@ -225,8 +223,20 @@ def start_video():
     video_data["date"]=str(datetime.now()).split()[0]
     video_data["name"]="surveillance_"+str(datetime.now())
     video_data["frame_ids"]=frames
+    #anomaly videos added to the database
+    anomaly_body=[]
+    for x in anomaly_videos:
+        anomaly_frames=[]
+        for y in x['raw_frames']:
+            _,buffer=cv2.imencode('.jpg', y)
+            frame_id = fs.put(buffer.tobytes())
+            anomaly_frames.append(frame_id)
+        anomaly_body.append({"date":str(datetime.now()).split()[0],"time":str(datetime.now()).split()[1],"frame_ids":anomaly_frames,"predicted_label":x['predicted_label'],"confidence":x["confidence"]})
 
-    response=requests.post("http://127.0.0.1:5000/api/addVideo",data=json.dumps(video_data,default=str))
+
+    if len(anomaly_body):
+         response_anomaly=requests.post("http://127.0.0.1:5000/api/addAnomaly",data=json.dumps(anomaly_body,default=str))
+    response_video=requests.post("http://127.0.0.1:5000/api/addVideo",data=json.dumps(video_data,default=str))
     load_videos()
 
 

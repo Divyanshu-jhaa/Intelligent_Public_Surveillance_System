@@ -6,7 +6,7 @@ from bson.objectid import ObjectId
 from pymongo import MongoClient
 from dotenv import load_dotenv,dotenv_values
 from flask_cors import CORS
-client=MongoClient("mongodb://localhost:27017")
+client=MongoClient("mongodb+srv://divyanshu_jhaa:edisem6@dj.hhzg1gp.mongodb.net/?retryWrites=true&w=majority&appName=DJ")
 db=client.SurveillanceDB
 user_records=db.user_records
 video_records=db.video_records
@@ -44,7 +44,7 @@ def addAnomaly():
     request_data_string=request_data_bytes.decode('utf-8')
     request_data_dict=json.loads(request_data_string)
  
-    res=anomaly_records.insert_many(request_data_dict['data'])  
+    res=anomaly_records.insert_many(request_data_dict)  
     return json.dumps({"acknowledged":res.acknowledged,"_id":res.inserted_ids},default=str) 
 
    
